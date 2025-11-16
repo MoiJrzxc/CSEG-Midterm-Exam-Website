@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Starlight Beacon</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+        body {
+            font-family: 'Space Mono', monospace;
+            background-color: #0d1117;
+            color: #c9d1d9;
+            background-image: radial-gradient(circle at top left, #161b22 0%, #0d1117 50%, #0d1117 100%);
+            background-size: 400% 400%;
+            animation: panBackground 20s infinite linear;
+        }
+        @keyframes panBackground {
+            0% { background-position: 0% 0%; }
+            50% { background-position: 100% 100%; }
+            100% { background-position: 0% 0%; }
+        }
+
+        .game-container {
+            min-height: 100vh;
+        }
+        .status-light {
+            width: 1rem;
+            height: 1rem;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 5px #00f0ff, 0 0 10px #00f0ff;
+            animation: pulse 1s infinite alternate;
+        }
+        @keyframes pulse {
+            from { opacity: 0.6; }
+            to { opacity: 1; }
+        }
+        .system-display {
+            border: 1px solid #30363d;
+            background-color: #161b22;
+            transition: box-shadow 1s ease-in-out;
+        }
+        .choice-button {
+            transition: all 0.2s;
+        }
+        .choice-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 240, 255, 0.4);
+            filter: brightness(1.2);
+        }
+        
+        #ai-core-visual {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1rem;
+        }
+        
+        .core-body {
+            stroke: #00f0ff;
+            fill: #161b22;
+            animation: breathe 3s infinite ease-in-out;
+            filter: drop-shadow(0 0 5px rgba(0, 240, 255, 0.5));
+        }
+        .core-eye {
+            fill: #ff0000; 
+            animation: eyeFlash 1s infinite step-end;
+            filter: drop-shadow(0 0 5px rgba(255, 0, 0, 0.8));
+        }
+        @keyframes eyeFlash {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.2; }
+        }
+        .animated-antenna {
+            fill: #00f0ff;
+            animation: antennaWiggle 0.5s infinite alternate;
+            transform-origin: 50% 50%;
+        }
+        @keyframes antennaWiggle {
+            from { transform: rotate(0deg) translateY(0px); }
+            to { transform: rotate(5deg) translateY(-1px); }
+        }
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.03); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container" class="game-container flex items-center justify-center p-4 sm:p-8">
+        <div id="main-content-wrapper" class="max-w-3xl w-full system-display rounded-xl p-6 md:p-10 shadow-2xl shadow-red-900/50">
+
+            <header class="mb-6 border-b border-cyan-500/50 pb-4 text-center">
+                <div id="ai-core-visual" class="mx-auto">
+                    <svg viewBox="0 0 100 100" class="w-full h-full">
+                        <rect x="30" y="10" width="5" height="20" rx="1" class="animated-antenna" style="transform-origin: 32.5px 30px;"/>
+                        <rect x="65" y="10" width="5" height="20" rx="1" class="animated-antenna" style="transform-origin: 67.5px 30px;"/>
+
+                        <rect class="core-body" x="20" y="25" width="60" height="60" rx="10" stroke-width="3" />
+                        
+                        <circle class="core-eye" cx="38" cy="45" r="5" />
+                        <circle class="core-eye" cx="62" cy="45" r="5" />
+                        
+                        <rect id="ai-core-port" x="30" y="70" width="40" height="5" rx="2" fill="#ff0000" opacity="0.8"/>
+                    </svg>
+                </div>
+                
+                <h1 class="text-3xl font-bold text-cyan-400 mt-4">STARLIGHT BEACON: CRITICAL</h1>
+                <p class="text-sm text-gray-500 mt-1 flex items-center justify-center">
+                    <span id="status-indicator" class="status-light bg-red-600 mr-2"></span>
+                    <span id="current-scene-name">SYSTEM AWAITING COMMAND</span>
+                </p>
+                <div id="system-status-hint" class="text-xs text-red-400 mt-2"></div>
+            </header>
+
+            <div id="text-display" class="text-lg mb-8 leading-relaxed text-gray-300">
+            </div>
+
+            <div id="choices-container" class="space-y-4">
+            </div>
+
+            <div id="message-box" class="mt-8 p-3 rounded-lg bg-yellow-900/40 text-yellow-300 text-sm hidden">
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const textDisplay = document.getElementById('text-display');
+        const choicesContainer = document.getElementById('choices-container');
+        const statusIndicator = document.getElementById('status-indicator');
+        const sceneNameDisplay = document.getElementById('current-scene-name');
+        const messageBox = document.getElementById('message-box');
+        const mainContentWrapper = document.getElementById('main-content-wrapper');
+        const systemStatusHint = document.getElementById('system-status-hint');
+        const aiCorePort = document.getElementById('ai-core-port');
+
+        let state = {
+            currentScene: 'start',
+            powerReroutedTo: null,
+            signalBoosted: false,
+            choicesMade: [],
+        };
+
+        const mainSynth = new Tone.Synth({
+            oscillator: { type: "square" },
+            envelope: { attack: 0.005, decay: 0.1, sustain: 0.0, release: 0.1 }
+        }).toDestination();
+        const noise = new Tone.NoiseSynth({
+            noise: { type: "white" },
+            envelope: { attack: 0.005, decay: 0.3, sustain: 0, release: 0.05 }
+        }).toDestination();
+        let initialized = false;
+
+        function playCriticalWarning() {
+            if (initialized) mainSynth.triggerAttackRelease("C3", "8n");
+        }
+        function playDecisionConfirmed() {
+            if (initialized) mainSynth.triggerAttackRelease("G4", "16n");
+        }
+        function playSuccessFanfare() {
+            if (initialized) {
+                const sequence = new Tone.Sequence((time, note) => {
+                    mainSynth.triggerAttackRelease(note, 0.1, time);
+                }, ["C5", "E5", "G5"], "4n");
+                sequence.start(0);
+                Tone.Transport.start();
+                setTimeout(() => Tone.Transport.stop(), 500);
+            }
+        }
+        function playFailureTone() {
+            if (initialized) {
+                mainSynth.triggerAttackRelease("C2", "0.5");
+                noise.triggerAttackRelease("2n");
+            }
+        }
+
+        function initAudio() {
+            if (!initialized) {
+                Tone.start().then(() => {
+                    initialized = true;
+                    playCriticalWarning();
+                });
+            }
+        }
+
+        function updateVisualFeedback(status, rerouteTarget) {
+            let shadowColor = 'shadow-red-900/50';
+            let hintText = 'CORE STATUS: CRITICAL';
+            let portColor = '#ff0000';
+
+            if (status === 'bg-red-600') {
+                shadowColor = 'shadow-red-900/80';
+            } else if (status === 'bg-yellow-500') {
+                shadowColor = 'shadow-yellow-700/60';
+                hintText = 'CORE STATUS: STABILIZED';
+            } else if (status === 'bg-orange-500') {
+                shadowColor = 'shadow-orange-700/70';
+                hintText = 'CORE STATUS: OVERLOAD WARNING';
+            } else if (status === 'bg-green-700') {
+                shadowColor = 'shadow-cyan-500/80';
+                hintText = 'SYSTEM: ONLINE AND STABLE';
+            } else if (status === 'bg-red-800') {
+                shadowColor = 'shadow-red-900/90';
+            }
+
+            mainContentWrapper.className = mainContentWrapper.className.replace(/shadow-[a-z0-9-/]+/g, '').trim();
+            mainContentWrapper.classList.add(shadowColor);
+            
+            if (rerouteTarget === 'lifeSupport') {
+                portColor = '#00f0ff';
+                if (status === 'bg-yellow-500') hintText = 'Life Support Nominal | Comms Damaged';
+            } else if (rerouteTarget === 'shields') {
+                portColor = '#ffc04d';
+                if (status === 'bg-yellow-500') hintText = 'Shields Reinforced | Life Support Compromised';
+            }
+
+            systemStatusHint.textContent = hintText;
+            aiCorePort.setAttribute('fill', portColor);
+
+            if (status === 'bg-green-700' && rerouteTarget) {
+                systemStatusHint.classList.remove('text-red-400', 'text-yellow-400');
+                systemStatusHint.classList.add('text-green-400');
+            } else if (status === 'bg-red-800' || status === 'bg-red-600') {
+                systemStatusHint.classList.remove('text-yellow-400', 'text-green-400');
+                systemStatusHint.classList.add('text-red-400');
+            } else {
+                systemStatusHint.classList.remove('text-red-400', 'text-green-400');
+                systemStatusHint.classList.add('text-yellow-400');
+            }
+        }
+
+        const scenes = {
+            'start': {
+                name: "INITIALIZING",
+                status: 'bg-red-600',
+                text: "You are Engineer Kael, alone on the remote Starlight Beacon. A sudden solar flare has caused a cascade failure. The station is losing atmosphere and the main power core is cycling erratically. Your main console screams with errors: **CRITICAL POWER DRAIN**. You have time for one major system adjustment before the core stabilizes or collapses.",
+                choices: [
+                    { text: "Reroute power to stabilize **Life Support** (Prioritize crew comfort, risk core collapse)", nextScene: 'decision1_life_support' },
+                    { text: "Reroute power to reinforce **Structural Shields** (Prioritize station integrity, risk crew discomfort)", nextScene: 'decision1_shields' }
+                ]
+            },
+
+            'decision1_life_support': {
+                name: "POWER: LIFE SUPPORT",
+                status: 'bg-yellow-500',
+                onEnter: () => { state.powerReroutedTo = 'lifeSupport'; state.choicesMade.push('Prioritized Life Support (Crew Comfort)'); },
+                text: "The Life Support systems normalize. A faint cheer is heard over the comms from the hibernating crew quarters. However, without power to the shields, a massive, unexpected particle surge is now damaging the primary communications array. You need to send a distress signal, but the signal strength is dropping.",
+                choices: [
+                    { text: "Boost signal power now (Drain remaining core energy)", nextScene: 'decision2_boost' },
+                    { text: "Send a minimal, encrypted burst signal (Conserve energy, risk signal failure)", nextScene: 'decision2_minimal' }
+                ]
+            },
+
+            'decision1_shields': {
+                name: "POWER: SHIELDS",
+                status: 'bg-yellow-500',
+                onEnter: () => { state.powerReroutedTo = 'shields'; state.choicesMade.push('Prioritized Shields (Station Integrity)'); },
+                text: "The structural integrity stabilizes, the pressure normalized. A particle surge hits the station, but the reinforced shields shunt the energy. However, the life support recycling systems, left unpowered, are failing. The air is thinning. You need to communicate the situation, but the main comms array is locked down by emergency protocols.",
+                choices: [
+                    { text: "Hack comms array to send distress signal (Risk system overload)", nextScene: 'decision2_boost' },
+                    { text: "Wait for automated systems to unlock comms (Safe, but slow)", nextScene: 'decision2_minimal' }
+                ]
+            },
+
+            'decision2_boost': {
+                name: "SIGNAL: BOOST",
+                status: 'bg-orange-500',
+                onEnter: () => { state.signalBoosted = true; state.choicesMade.push('Boosted Signal Power/Forced Comms'); },
+                text: "You force the remaining energy into the signal array. It sends out a powerful, station-wide distress call. The energy drain is immense. The core warns of an imminent **Plasma Breach**. You must divert the plasma flow or overload the system.",
+                choices: [
+                    { text: "Divert flow to the main Reactor Conduit (Massive risk, but fastest fix)", nextScene: 'decision3_reactor' },
+                    { text: "Divert flow to the Auxiliary Coolant Vents (Slower, less risky, but might be too late)", nextScene: 'decision3_vents' }
+                ]
+            },
+
+            'decision2_minimal': {
+                name: "SIGNAL: MINIMAL",
+                status: 'bg-orange-500',
+                onEnter: () => { state.signalBoosted = false; state.choicesMade.push('Used Minimal Signal/Waited'); },
+                text: "You send a minimal burst signal or wait for the system. It saves energy, but a confirmation of the distress call is delayed. Meanwhile, the main core is overheating and warns of an imminent **Plasma Breach**. You must divert the plasma flow or overload the system.",
+                choices: [
+                    { text: "Divert flow to the main Reactor Conduit (Massive risk, but fastest fix)", nextScene: 'decision3_reactor' },
+                    { text: "Divert flow to the Auxiliary Coolant Vents (Slower, less risky, but might be too late)", nextScene: 'decision3_vents' }
+                ]
+            },
+            
+            'decision3_reactor': {
+                name: "DIVERSION: REACTOR",
+                status: 'bg-red-800',
+                onEnter: () => { state.choicesMade.push('Diverted to Reactor'); playCriticalWarning(); },
+                text: "You divert the plasma directly to the Reactor Conduit. A catastrophic failure point. The diversion is successful, but the core is permanently damaged. Now, we check the consequences of your previous choices...",
+                choices: [
+                    { text: "View Resolution", nextScene: 'resolution_reactor' },
+                ]
+            },
+
+            'decision3_vents': {
+                name: "DIVERSION: VENTS",
+                status: 'bg-red-800',
+                onEnter: () => { state.choicesMade.push('Diverted to Vents'); playCriticalWarning(); },
+                text: "You divert the plasma to the Auxiliary Coolant Vents. The process is slow. The station shakes violently. Now, we check the consequences of your previous choices...",
+                choices: [
+                    { text: "View Resolution", nextScene: 'resolution_vents' },
+                ]
+            },
+
+            'resolution_reactor': {
+                name: "REACTOR RESOLUTION",
+                status: 'bg-green-700',
+                onEnter: (s) => { 
+                    if (s.powerReroutedTo === 'shields' && s.signalBoosted) playSuccessFanfare();
+                    else playFailureTone();
+                },
+                text: (s) => {
+                    let text = "The plasma diversion to the Reactor Conduit bought you time, but the core is critically unstable. ";
+                    if (s.powerReroutedTo === 'lifeSupport' && s.signalBoosted) {
+                        text += "The boosted signal got through, and a rescue fleet is inbound. However, the core collapse is unavoidable. You have evacuated the crew but the **Starlight Beacon is lost.** (Success: High Cost)";
+                    } else if (s.powerReroutedTo === 'shields' && !s.signalBoosted) {
+                        text += "The minimal signal failed, but the station integrity is intact. Without a rescue signal, you are trapped. You are eventually found, but only after **weeks of silence. Many lives were lost.** (Failure: High Isolation)";
+                    } else if (s.powerReroutedTo === 'shields' && s.signalBoosted) {
+                         text += "The structural shield and boosted signal saved the day. The rescue fleet arrives and the core is shut down safely. **Mission Success.** (Success: Optimal Outcome)";
+                    } else if (s.powerReroutedTo === 'lifeSupport' && !s.signalBoosted) {
+                         text += "You saved the crew's comfort, but the minimal signal failed. The core is now collapsing. The rescue fleet receives your last-ditch message moments before the station is consumed. **Partial Success: Most lives saved, but the Beacon is destroyed.** (Partial Success)";
+                    }
+                    return text + `<br><br>---<br><br>Game Over. Decisions Made: ${s.choicesMade.join(', ')}.`;
+                },
+                choices: [{ text: "Restart Game", nextScene: 'start' }]
+            },
+
+            'resolution_vents': {
+                name: "VENTS RESOLUTION",
+                status: 'bg-green-700',
+                onEnter: (s) => { 
+                    if (s.powerReroutedTo === 'shields' && s.signalBoosted) playSuccessFanfare();
+                    else playFailureTone();
+                },
+                text: (s) => {
+                    let text = "Diverting the plasma through the Coolant Vents was too slow. The core overheated and is now operating at 5% capacity. ";
+                    if (s.powerReroutedTo === 'shields' && s.signalBoosted) {
+                        text += "Your strong shields held, and the boosted signal brought rescue. The station is crippled, but the crew and most systems are intact. **A difficult success. You are relieved of duty.** (Success: Moderate Damage)";
+                    } else if (s.powerReroutedTo === 'lifeSupport' && !s.signalBoosted) {
+                        text += "You focused on life support and conservation. The minimal signal worked, but the core failed moments after. The rescue fleet finds the crew alive, but **The Starlight Beacon is a frozen tomb.** (Failure: Crew Saved)";
+                    } else {
+                        text += "The core fails before the rescue arrives. The combination of slow diversion and other factors leads to a full station blackout. **You and the crew are lost to the void.** (Failure: Catastrophic)";
+                    }
+                    return text + `<br><br>---<br><br>Game Over. Decisions Made: ${s.choicesMade.join(', ')}.`;
+                },
+                choices: [{ text: "Restart Game", nextScene: 'start' }]
+            }
+        };
+
+        function goToScene(sceneId) {
+            if (sceneId === 'start') {
+                state = {
+                    currentScene: 'start',
+                    powerReroutedTo: null,
+                    signalBoosted: false,
+                    choicesMade: [],
+                };
+                updateVisualFeedback(scenes.start.status, null);
+            } else {
+                playDecisionConfirmed();
+            }
+
+            const scene = scenes[sceneId];
+            if (!scene) {
+                console.error("Scene not found:", sceneId);
+                showMessage("ERROR: System malfunction. Scene data lost.", 5000);
+                return;
+            }
+
+            state.currentScene = sceneId;
+
+            if (scene.onEnter) {
+                scene.onEnter(state);
+            }
+
+            const textContent = typeof scene.text === 'function' ? scene.text(state) : scene.text;
+            textDisplay.innerHTML = textContent;
+            
+            choicesContainer.innerHTML = '';
+            scene.choices.forEach(choice => {
+                const button = document.createElement('button');
+                button.textContent = `> ${choice.text}`;
+                button.className = "choice-button w-full text-left bg-cyan-700 hover:bg-cyan-600 text-white font-semibold py-3 px-5 rounded-lg shadow-md";
+                button.onclick = () => goToScene(choice.nextScene);
+                choicesContainer.appendChild(button);
+            });
+
+            statusIndicator.className = `status-light ${scene.status} mr-2`;
+            sceneNameDisplay.textContent = scene.name;
+
+            updateVisualFeedback(scene.status, state.powerReroutedTo);
+        }
+
+        window.onload = function() {
+            initAudio();
+            goToScene('start');
+        }
+
+    </script>
+
+</body>
+</html>
+```eof
